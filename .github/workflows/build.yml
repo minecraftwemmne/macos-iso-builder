@@ -26,7 +26,7 @@ jobs:
   build-iso:
     runs-on: macos-15-intel
     timeout-minutes: 120
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -46,7 +46,7 @@ jobs:
           echo "Fetching available installers..."
           softwareupdate --list-full-installers 2>/dev/null | grep "* Title:" | sed 's/^[[:space:]]*//' > installers.txt
           cat installers.txt
-          
+
           # Parse and find matching installer
           if [ -n "${{ github.event.inputs.specific_version }}" ]; then
             INSTALLER_VERSION="${{ github.event.inputs.specific_version }}"
@@ -56,22 +56,22 @@ jobs:
             INSTALLER_VERSION=$(grep "${{ github.event.inputs.macos_version }}" installers.txt | head -1 | sed -n 's/.*Version: \([^,]*\).*/\1/p')
             echo "Found latest version: $INSTALLER_VERSION"
           fi
-          
+
           if [ -z "$INSTALLER_VERSION" ]; then
             echo "Error: Could not find installer version"
             exit 1
           fi
-          
+
           echo "version=$INSTALLER_VERSION" >> $GITHUB_OUTPUT
 
       - name: Download macOS installer
         run: |
           echo "Downloading macOS ${{ github.event.inputs.macos_version }} version ${{ steps.fetch_installers.outputs.version }}"
-          
+
           # Download with retries
           MAX_RETRIES=3
           RETRY_COUNT=0
-          
+
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             if softwareupdate --fetch-full-installer --full-installer-version "${{ steps.fetch_installers.outputs.version }}"; then
               echo "Download successful!"
@@ -82,12 +82,12 @@ jobs:
               sleep 10
             fi
           done
-          
+
           if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
             echo "Download failed after $MAX_RETRIES attempts"
             exit 1
           fi
-          
+
           # Verify installer exists and set path
           INSTALLER_PATH="/Applications/Install macOS ${{ github.event.inputs.macos_version }}.app"
           if [ ! -d "$INSTALLER_PATH" ]; then
@@ -101,7 +101,7 @@ jobs:
         id: create_iso
         run: |
           echo "Creating ISO for macOS ${{ github.event.inputs.macos_version }}"
-          
+
           # Set variables
           ISO_NAME="macOS_${{ github.event.inputs.macos_version }}_${{ steps.fetch_installers.outputs.version }}"
           ISO_NAME="${ISO_NAME// /_}"
@@ -109,35 +109,31 @@ jobs:
           ISO_FILE="${GITHUB_WORKSPACE}/${ISO_NAME}.iso"
           VOLUME_NAME="${ISO_NAME}_installer"
           INSTALLER_PATH="/Applications/Install macOS ${{ github.event.inputs.macos_version }}.app"
-          
+
           echo "ISO will be created at: $ISO_FILE"
           echo "Using installer at: $INSTALLER_PATH"
-          
+
           # Create sparse image
           echo "Creating sparse image..."
           hdiutil create -size 20g -volname "$VOLUME_NAME" -fs HFS+ -type SPARSE -attach "$SPARSE_IMAGE"
-          
+
           # Create install media
           echo "Creating install media..."
           sudo "$INSTALLER_PATH/Contents/Resources/createinstallmedia" --volume "/Volumes/$VOLUME_NAME" --nointeraction
-          
-          # Detach volume
-          echo "Detaching volume..."
-          INSTALLER_NAME="Install macOS ${{ github.event.inputs.macos_version }}"
-          if hdiutil detach "/Volumes/$INSTALLER_NAME" || hdiutil detach "/Volumes/$INSTALLER_NAME" -force; then
-            echo "Volume detached successfully"
-          else
-            echo "Failed to detach volume"
-          fi
-          sleep 2
-          
+
+          # Detach volume（修复后的卸载逻辑）
+          echo "Detaching all related volumes..."
+          hdiutil detach /Volumes/"Install macOS"* 2>/dev/null || true
+          hdiutil detach "$SPARSE_IMAGE" 2>/dev/null || hdiutil detach "$SPARSE_IMAGE" -force 2>/dev/null
+          sleep 4
+
           # Create hybrid ISO
           hdiutil makehybrid -hfs -udf -o "$ISO_FILE" "$SPARSE_IMAGE"
-          
+
           # Clean up
           echo "Cleaning up temporary files..."
           rm -f "$SPARSE_IMAGE"
-          
+
           # Show ISO info and set output
           if [ -f "$ISO_FILE" ]; then
             ISO_SIZE=$(du -h "$ISO_FILE" | cut -f1)
