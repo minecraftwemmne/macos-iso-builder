@@ -113,24 +113,26 @@ jobs:
           echo "ISO will be created at: $ISO_FILE"
           echo "Using installer at: $INSTALLER_PATH"
 
-          # Create sparse image
+          # Create sparse image, Tahoe体积较大调整为24G
           echo "Creating sparse image..."
-          hdiutil create -size 20g -volname "$VOLUME_NAME" -fs HFS+ -type SPARSE -attach "$SPARSE_IMAGE"
+          hdiutil create -size 24g -volname "$VOLUME_NAME" -fs HFS+ -type SPARSE -attach "$SPARSE_IMAGE"
 
           # Create install media
           echo "Creating install media..."
           sudo "$INSTALLER_PATH/Contents/Resources/createinstallmedia" --volume "/Volumes/$VOLUME_NAME" --nointeraction
 
-          # Detach volume（修复后的卸载逻辑）
-          echo "Detaching all related volumes..."
+          # 仅卸载安装器挂载卷，**保留sparseimage文件，不卸载sparseimage本体**
+          echo "Unmount only installer volume, keep sparseimage file intact"
           hdiutil detach /Volumes/"Install macOS"* 2>/dev/null || true
-          hdiutil detach "$SPARSE_IMAGE" 2>/dev/null || hdiutil detach "$SPARSE_IMAGE" -force 2>/dev/null
-          sleep 4
+          sleep 3
 
-          # Create hybrid ISO
+          # makehybrid直接读取sparseimage文件，无需挂载磁盘
+          echo "Start building hybrid ISO..."
+          set -x
           hdiutil makehybrid -hfs -udf -o "$ISO_FILE" "$SPARSE_IMAGE"
+          set +x
 
-          # Clean up
+          # ISO构建完成后清理临时文件
           echo "Cleaning up temporary files..."
           rm -f "$SPARSE_IMAGE"
 
